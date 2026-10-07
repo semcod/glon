@@ -837,6 +837,12 @@ def _handle_clone(arguments: Sequence[str]) -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Dispatch the requested CLI command."""
+    try:
+        from .autoupdate import check_for_updates
+        check_for_updates("glon")
+    except Exception:
+        pass
+
     arguments = list(sys.argv[1:] if argv is None else argv)
 
     if "open" in arguments:
