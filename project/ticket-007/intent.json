@@ -1,0 +1,82 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-007",
+  "summary": "Remediate PERF-AUDIT findings and adopt Wellmanifest standards",
+  "workstream": "application",
+  "classification": {
+    "kind": "BUG",
+    "priority": "P2",
+    "origin": "health"
+  },
+  "allowedPaths": [
+    ".governance/manifest.json",
+    "TODO.md",
+    "glon/cli.py",
+    "project/TICKETS.md",
+    "project/ticket-003/README.md",
+    "project/ticket-005/README.md",
+    "project/ticket-007/**",
+    "project/ticket-006/README.md"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "2133f2ada4272149a3163694a6b3dae3d56e8752",
+    "targetBranch": "main",
+    "outcome": "Remediate all PERF-AUDIT findings in glon/cli.py and adopt Wellmanifest baseline standard-pack conformance.",
+    "nonGoals": [
+      "Change public CLI behavior",
+      "Modify runtime dependencies"
+    ],
+    "complexity": "S",
+    "estimatedMinutes": 15,
+    "budgets": {
+      "maxImplementationFiles": 5,
+      "maxAffectedComponents": 2,
+      "maxPublicInterfaceChanges": 0,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Extract _run_clipboard_command helper outside the loop in _read_clipboard_text, pass explicit max_len at _clipboard_url_candidate call site, and record baseline Wellmanifest standard-adoption bindings.",
+      "components": [
+        {
+          "name": "cli",
+          "paths": [
+            "glon/cli.py",
+            ".governance/manifest.json",
+            ".governance/standard-adoption.json",
+            ".governance/standard-packs.json",
+            ".governance/standard_pack_check.py"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert commit on ticket/007-remediate-perf-audit-and-adopt-standards."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "python3 .governance/standard_pack_check.py --root .",
+          "./project/governance-check.sh",
+          "pytest -q"
+        ],
+        "evidence": "0 PERF-AUDIT findings, 0 standard-pack findings, all tests and governance checks pass."
+      }
+    ]
+  }
+}
