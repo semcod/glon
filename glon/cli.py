@@ -111,6 +111,15 @@ def get_all_projects_with_time(base_path: Optional[str] = None) -> List[ProjectI
     return sorted(projects, key=lambda x: x["mtime"], reverse=True)
 
 
+def _run_clipboard_command(command: list[str]) -> Optional[str]:
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    text = (result.stdout or "").strip()
+    return text or None
+
+
 def _read_clipboard_text() -> Optional[str]:
     if tkinter is not None:
         try:
@@ -129,12 +138,7 @@ def _read_clipboard_text() -> Optional[str]:
         ["xclip", "-o", "-selection", "clipboard"],
         ["xsel", "--clipboard", "--output"],
     ):
-        try:
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-        except (OSError, subprocess.CalledProcessError):
-            continue
-
-        text = (result.stdout or "").strip()
+        text = _run_clipboard_command(command)
         if text:
             return text
 
@@ -800,7 +804,7 @@ def _build_clone_parser() -> argparse.ArgumentParser:
 
 def _handle_clone(arguments: Sequence[str]) -> None:
     options = _build_clone_parser().parse_args(arguments)
-    url = options.url or _clipboard_url_candidate()
+    url = options.url or _clipboard_url_candidate(max_len=MAX_CLIPBOARD_URL_LENGTH)
     if url is None:
         print(
             "Error: Missing git URL. Provide URL argument or copy a valid "

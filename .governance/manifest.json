@@ -33,7 +33,8 @@
           "app/**",
           "lib/**",
           "test/**",
-          "tests/**"
+          "tests/**",
+          "glon/cli.py"
         ]
       },
       "governance": {
@@ -126,7 +127,11 @@
   "governancePaths": [
     "TODO.md",
     "project/TICKETS.md",
-    "project/ticket-*/**"
+    "project/ticket-*/**",
+    ".governance/manifest.json",
+    ".governance/standard-adoption.json",
+    ".governance/standard-packs.json",
+    ".governance/standard_pack_check.py"
   ],
   "requiredFiles": [
     "README.md",
