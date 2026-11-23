@@ -1,0 +1,3 @@
+2026-11-23T12:40:00+01:00 ticket-014 verification log
+- pytest -q: 70 passed
+- ./project/governance-check.sh: GOV-PASS (0 errors, 0 warnings)
