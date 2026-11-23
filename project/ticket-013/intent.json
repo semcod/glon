@@ -1,0 +1,77 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-013",
+  "summary": "Validate existing origin matches owner/repo before publish",
+  "workstream": "application",
+  "classification": {
+    "kind": "BUG",
+    "priority": "P1",
+    "origin": "health"
+  },
+  "allowedPaths": [
+    "project/ticket-013/**",
+    "project/ticket-012/README.md",
+    "TODO.md",
+    "project/TICKETS.md",
+    "glon/cli.py",
+    "tests/test_cli.py"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "dee75db022ac1ead832c67c87c1e74e342abdd8e",
+    "targetBranch": "main",
+    "outcome": "Fail closed in glon publish when an existing origin remote does not match the github/<owner>/<repo> path.",
+    "nonGoals": [
+      "Add runtime dependencies",
+      "Auto-rewrite foreign origin URLs"
+    ],
+    "complexity": "XS",
+    "estimatedMinutes": 10,
+    "budgets": {
+      "maxImplementationFiles": 2,
+      "maxAffectedComponents": 1,
+      "maxPublicInterfaceChanges": 0,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Validate existing origin URL via parse_git_url in glon/cli.py before calling gh repo edit or git push.",
+      "components": [
+        {
+          "name": "glon-cli",
+          "paths": [
+            "glon/cli.py",
+            "tests/test_cli.py"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert commit on ticket/013-validate-origin-before-publish."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "pytest -q",
+          "mypy --python-version 3.10 glon",
+          "./project/governance-check.sh"
+        ],
+        "evidence": "All 70 tests, mypy, and governance checks pass."
+      }
+    ]
+  }
+}
