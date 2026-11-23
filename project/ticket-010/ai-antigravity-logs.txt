@@ -1,0 +1,5 @@
+2026-11-23T09:00:00+01:00 ticket-010 verification log
+- pytest -q: 68 passed
+- mypy --python-version 3.10 glon: pass
+- ./project/governance-check.sh: GOV-PASS (0 errors, 0 warnings)
+- wellman check --root .: pass

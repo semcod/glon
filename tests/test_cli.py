@@ -11,7 +11,9 @@ from glon.cli import (
     _extract_git_url_from_text,
     clone_repository,
     create_directory_structure,
+    detect_github_repo_from_cwd,
     parse_git_url,
+    publish_repository,
 )
 
 
@@ -385,3 +387,219 @@ class TestCLIIntegration:
 
         mock_parse.assert_called_once_with("https://github.com/owner/repo.git")
         mock_clone.assert_called_once()
+
+
+class TestDetectGithubRepo:
+    """Test cases for detecting github/<owner>/<repo> from cwd."""
+
+    def test_detect_repo_under_base_path(self) -> None:
+        """Detect owner/repo when cwd is directly under base_path."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "kvmouse" / "pi2w"
+            repo_dir.mkdir(parents=True)
+
+            result = detect_github_repo_from_cwd(cwd=repo_dir, base_path=temp_dir)
+
+            assert result == ("kvmouse", "pi2w", repo_dir.resolve())
+
+    def test_detect_repo_from_nested_subdir(self) -> None:
+        """Detect owner/repo root even when cwd is a subdirectory."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "kvmouse" / "pi2w"
+            nested_dir = repo_dir / "docs" / "guides"
+            nested_dir.mkdir(parents=True)
+
+            result = detect_github_repo_from_cwd(cwd=nested_dir, base_path=temp_dir)
+
+            assert result == ("kvmouse", "pi2w", repo_dir.resolve())
+
+    def test_detect_repo_under_generic_github_dir(self) -> None:
+        """Detect owner/repo under any .../github/<owner>/<repo> path."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "github" / "semcod" / "glon"
+            repo_dir.mkdir(parents=True)
+
+            with patch("os.path.expanduser", return_value="/nonexistent/github"):
+                result = detect_github_repo_from_cwd(cwd=repo_dir)
+
+            assert result == ("semcod", "glon", repo_dir.resolve())
+
+    def test_detect_returns_none_outside_repo_level(self) -> None:
+        """Return None at owner level or outside github directory."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            owner_dir = Path(temp_dir) / "kvmouse"
+            owner_dir.mkdir(parents=True)
+
+            assert detect_github_repo_from_cwd(cwd=owner_dir, base_path=temp_dir) is None
+            assert (
+                detect_github_repo_from_cwd(cwd=Path(temp_dir), base_path=temp_dir)
+                is None
+            )
+
+
+class TestPublishRepository:
+    """Test cases for publishing github/*/* repos via gh and goal -a."""
+
+    @patch("subprocess.run")
+    def test_publish_new_repo_private_default(self, mock_run) -> None:
+        """Initialize git, create private GitHub repo via gh, and run goal -a."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "github" / "kvmouse" / "pi2w"
+            repo_dir.mkdir(parents=True)
+
+            def fake_run(cmd, **kwargs):
+                if cmd[:3] == ["git", "rev-parse", "--verify"]:
+                    return MagicMock(returncode=1, stdout="", stderr="")
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            mock_run.side_effect = fake_run
+
+            result = publish_repository(repo_dir, "kvmouse", "pi2w")
+
+            assert result is True
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            assert ["git", "init"] in commands
+            assert ["git", "add", "-A"] in commands
+            assert ["git", "commit", "--allow-empty", "-m", "Initial commit"] in commands
+            assert [
+                "gh",
+                "repo",
+                "create",
+                "kvmouse/pi2w",
+                "--private",
+                "--source=.",
+                "--remote=origin",
+                "--push",
+            ] in commands
+            assert ["goal", "-a"] in commands
+
+    @patch("subprocess.run")
+    def test_publish_existing_origin_public(self, mock_run) -> None:
+        """Update visibility to public, push origin, and run goal -a."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "github" / "semcod" / "glon"
+            (repo_dir / ".git").mkdir(parents=True)
+
+            def fake_run(cmd, **kwargs):
+                if cmd[:3] == ["git", "remote", "get-url"]:
+                    return MagicMock(
+                        returncode=0,
+                        stdout="https://github.com/semcod/glon.git\n",
+                        stderr="",
+                    )
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            mock_run.side_effect = fake_run
+
+            result = publish_repository(repo_dir, "semcod", "glon", visibility="public")
+
+            assert result is True
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            assert [
+                "gh",
+                "repo",
+                "edit",
+                "semcod/glon",
+                "--visibility",
+                "public",
+            ] in commands
+            assert ["git", "push", "-u", "origin", "HEAD"] in commands
+            assert ["goal", "-a"] in commands
+
+    @patch("subprocess.run")
+    def test_publish_dry_run_skips_mutating_commands(self, mock_run) -> None:
+        """Dry run prints planned commands without executing gh or goal."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "github" / "kvmouse" / "pi2w"
+            repo_dir.mkdir(parents=True)
+
+            result = publish_repository(
+                repo_dir, "kvmouse", "pi2w", visibility="private", dry_run=True
+            )
+
+            assert result is True
+            mock_run.assert_not_called()
+
+    @patch("glon.cli.publish_repository", return_value=True)
+    @patch("glon.cli.detect_github_repo_from_cwd")
+    def test_main_no_args_in_github_folder_publishes_private(
+        self, mock_detect, mock_publish
+    ) -> None:
+        """Running `glon` inside github/*/* publishes privately by default."""
+        repo_path = Path("/tmp/github/kvmouse/pi2w")
+        mock_detect.return_value = ("kvmouse", "pi2w", repo_path)
+
+        with patch("sys.argv", ["glon"]):
+            from glon.cli import main
+
+            main()
+
+        mock_publish.assert_called_once_with(
+            repo_path,
+            "kvmouse",
+            "pi2w",
+            visibility="private",
+            dry_run=False,
+            verbose=False,
+        )
+
+    @patch("glon.cli.publish_repository", return_value=True)
+    @patch("glon.cli.detect_github_repo_from_cwd")
+    def test_main_public_subcommand_publishes_public(
+        self, mock_detect, mock_publish
+    ) -> None:
+        """Running `glon public` publishes with public visibility."""
+        repo_path = Path("/tmp/github/kvmouse/pi2w")
+        mock_detect.return_value = ("kvmouse", "pi2w", repo_path)
+
+        with patch("sys.argv", ["glon", "public"]):
+            from glon.cli import main
+
+            main()
+
+        mock_publish.assert_called_once_with(
+            repo_path,
+            "kvmouse",
+            "pi2w",
+            visibility="public",
+            dry_run=False,
+            verbose=False,
+        )
+
+    @patch("glon.cli.publish_repository", return_value=True)
+    @patch("glon.cli.detect_github_repo_from_cwd")
+    def test_main_private_subcommand_publishes_private(
+        self, mock_detect, mock_publish
+    ) -> None:
+        """Running `glon private` publishes with private visibility."""
+        repo_path = Path("/tmp/github/kvmouse/pi2w")
+        mock_detect.return_value = ("kvmouse", "pi2w", repo_path)
+
+        with patch("sys.argv", ["glon", "private"]):
+            from glon.cli import main
+
+            main()
+
+        mock_publish.assert_called_once_with(
+            repo_path,
+            "kvmouse",
+            "pi2w",
+            visibility="private",
+            dry_run=False,
+            verbose=False,
+        )
+
+    @patch("glon.cli.detect_github_repo_from_cwd", return_value=None)
+    def test_main_private_outside_github_folder_prints_error(
+        self, mock_detect
+    ) -> None:
+        """Running `glon private` outside github/*/* prints a clear error."""
+        with patch("sys.argv", ["glon", "private"]):
+            with patch("builtins.print") as mock_print:
+                from glon.cli import main
+
+                main()
+
+        mock_print.assert_any_call(
+            "Error: Current directory is not inside a github/<owner>/<repo> folder."
+        )

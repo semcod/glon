@@ -37,6 +37,7 @@ DAYS_PER_MONTH = 30
 DAYS_PER_QUARTER = 90
 DAYS_PER_HALF_YEAR = 180
 DAYS_PER_YEAR = 365
+PUBLISH_VISIBILITIES = ("private", "public")
 
 SSH_URL_RE = re.compile(r"git@[^:]+:([^/]+)/([^/]+)\.git$")
 HTTPS_URL_RE = re.compile(r"https://[^/]+/([^/]+)/([^/]+)\.git$")
@@ -138,9 +139,9 @@ def _read_clipboard_text() -> Optional[str]:
         ["xclip", "-o", "-selection", "clipboard"],
         ["xsel", "--clipboard", "--output"],
     ):
-        text = _run_clipboard_command(command)
-        if text:
-            return text
+        clipboard_text = _run_clipboard_command(command)
+        if clipboard_text:
+            return clipboard_text
 
     return None
 
@@ -780,6 +781,365 @@ def _handle_grab(arguments: Sequence[str]) -> None:
     )
 
 
+def detect_github_repo_from_cwd(
+    cwd: Optional[Path] = None, base_path: Optional[str] = None
+) -> Optional[Tuple[str, str, Path]]:
+    """Detect ``(owner, repo, repo_root)`` when cwd is inside ``github/*/*``."""
+    current_dir = (cwd or Path.cwd()).resolve()
+    base_dir = _expand_base_path(base_path).resolve()
+
+    try:
+        relative = current_dir.relative_to(base_dir)
+    except ValueError:
+        relative = None
+
+    if relative is not None and len(relative.parts) >= 2:
+        owner, repo = relative.parts[0], relative.parts[1]
+        return owner, repo, base_dir / owner / repo
+
+    if base_path is None:
+        parts = current_dir.parts
+        for index in range(len(parts) - 1, -1, -1):
+            if parts[index].lower() == "github" and len(parts) >= index + 3:
+                owner, repo = parts[index + 1], parts[index + 2]
+                return owner, repo, Path(*parts[: index + 3])
+
+    return None
+
+
+def _ensure_git_repo_and_commit(
+    repo_dir: Path, dry_run: bool = False, verbose: bool = False
+) -> bool:
+    """Ensure ``repo_dir`` is an initialized Git repository with at least one commit."""
+    git_dir = repo_dir / ".git"
+    if not git_dir.exists():
+        if dry_run:
+            print(f"Would run: git init (cwd={repo_dir})")
+            print(f"Would stage files and create initial commit in {repo_dir}")
+            return True
+        try:
+            subprocess.run(
+                ["git", "init"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            if verbose:
+                print(f"Initialized git repository in {repo_dir}")
+        except subprocess.CalledProcessError as error:
+            print(f"Failed to initialize git repository: {error.stderr or error}")
+            return False
+        except FileNotFoundError:
+            print("Git is not installed or not in PATH")
+            return False
+
+    try:
+        head_check = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        print("Git is not installed or not in PATH")
+        return False
+
+    if head_check.returncode == 0:
+        return True
+
+    if dry_run:
+        print(f"Would stage files and create initial commit in {repo_dir}")
+        return True
+
+    try:
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "Initial commit"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if verbose:
+            print(f"Created initial commit in {repo_dir}")
+        return True
+    except subprocess.CalledProcessError as error:
+        print(f"Failed to create initial commit: {error.stderr or error}")
+        return False
+
+
+def _has_origin_remote(repo_dir: Path) -> bool:
+    """Return True when ``origin`` remote is configured in ``repo_dir``."""
+    if not (repo_dir / ".git").exists():
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False
+    return result.returncode == 0 and bool((result.stdout or "").strip())
+
+
+def _set_github_visibility(
+    repo_dir: Path,
+    full_name: str,
+    visibility: str,
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Ensure GitHub repository visibility matches ``visibility`` via ``gh``."""
+    command = ["gh", "repo", "edit", full_name, "--visibility", visibility]
+    if dry_run:
+        print(f"Would run: {' '.join(command)}")
+        return True
+
+    try:
+        subprocess.run(
+            command,
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if verbose:
+            print(f"Set GitHub visibility for {full_name} to {visibility}")
+        return True
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr or ""
+        if "--accept-visibility-change-consequences" in stderr:
+            try:
+                subprocess.run(
+                    [*command, "--accept-visibility-change-consequences"],
+                    cwd=repo_dir,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                return True
+            except subprocess.CalledProcessError as retry_error:
+                print(
+                    "Failed to update repository visibility: "
+                    f"{retry_error.stderr or retry_error}"
+                )
+                return False
+        print(f"Failed to update repository visibility: {stderr or error}")
+        return False
+    except FileNotFoundError:
+        print("GitHub CLI (gh) is not installed or not in PATH")
+        return False
+
+
+def _attach_origin_and_push(
+    repo_dir: Path,
+    full_name: str,
+    visibility: str,
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Attach ``origin`` for an existing GitHub repo, update visibility, and push."""
+    remote_url = f"https://github.com/{full_name}.git"
+    if not _has_origin_remote(repo_dir):
+        if dry_run:
+            print(f"Would run: git remote add origin {remote_url}")
+        else:
+            try:
+                subprocess.run(
+                    ["git", "remote", "add", "origin", remote_url],
+                    cwd=repo_dir,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as error:
+                print(f"Failed to add origin remote: {error.stderr or error}")
+                return False
+
+    if not _set_github_visibility(
+        repo_dir, full_name, visibility, dry_run=dry_run, verbose=verbose
+    ):
+        return False
+
+    push_command = ["git", "push", "-u", "origin", "HEAD"]
+    if dry_run:
+        print(f"Would run: {' '.join(push_command)}")
+        return True
+
+    try:
+        subprocess.run(
+            push_command,
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError as error:
+        print(f"Failed to push repository to origin: {error.stderr or error}")
+        return False
+
+
+def _publish_to_github(
+    repo_dir: Path,
+    owner: str,
+    repo: str,
+    visibility: str = "private",
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Create or update the GitHub repository via ``gh`` and push."""
+    full_name = f"{owner}/{repo}"
+    if _has_origin_remote(repo_dir):
+        return _attach_origin_and_push(
+            repo_dir, full_name, visibility, dry_run=dry_run, verbose=verbose
+        )
+
+    command = [
+        "gh",
+        "repo",
+        "create",
+        full_name,
+        f"--{visibility}",
+        "--source=.",
+        "--remote=origin",
+        "--push",
+    ]
+    if dry_run:
+        print(f"Would run: {' '.join(command)} (cwd={repo_dir})")
+        return True
+
+    try:
+        subprocess.run(
+            command,
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        print(f"Published {full_name} ({visibility}) to GitHub")
+        return True
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr or ""
+        if "already exists" in stderr.lower():
+            return _attach_origin_and_push(
+                repo_dir, full_name, visibility, dry_run=dry_run, verbose=verbose
+            )
+        print(f"Failed to publish {full_name} via gh: {stderr or error}")
+        return False
+    except FileNotFoundError:
+        print("GitHub CLI (gh) is not installed or not in PATH")
+        return False
+
+
+def _run_goal_publish(
+    repo_dir: Path, dry_run: bool = False, verbose: bool = False
+) -> bool:
+    """Run ``goal -a`` to publish the repository to PyPI and other registries."""
+    command = ["goal", "-a"]
+    if dry_run:
+        print(f"Would run: {' '.join(command)} (cwd={repo_dir})")
+        return True
+
+    try:
+        subprocess.run(command, cwd=repo_dir, check=True)
+        if verbose:
+            print(f"Completed goal -a in {repo_dir}")
+        return True
+    except subprocess.CalledProcessError as error:
+        print(f"Failed to run goal -a: {error}")
+        return False
+    except FileNotFoundError:
+        print("Goal CLI (goal) is not installed or not in PATH")
+        return False
+
+
+def publish_repository(
+    repo_dir: Path,
+    owner: str,
+    repo: str,
+    visibility: str = "private",
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Publish a local ``github/<owner>/<repo>`` directory via ``gh`` and ``goal -a``."""
+    if visibility not in PUBLISH_VISIBILITIES:
+        print(f"Error: Unsupported visibility '{visibility}'. Use private or public.")
+        return False
+
+    if verbose:
+        print(f"Publishing {owner}/{repo} from {repo_dir} as {visibility}")
+
+    if not _ensure_git_repo_and_commit(repo_dir, dry_run=dry_run, verbose=verbose):
+        return False
+    if not _publish_to_github(
+        repo_dir, owner, repo, visibility=visibility, dry_run=dry_run, verbose=verbose
+    ):
+        return False
+    return _run_goal_publish(repo_dir, dry_run=dry_run, verbose=verbose)
+
+
+def _build_publish_parser(default_visibility: str = "private") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Publish current github/<owner>/<repo> directory via gh and goal -a"
+        ),
+        prog="glon publish",
+    )
+    parser.add_argument(
+        "visibility",
+        nargs="?",
+        choices=list(PUBLISH_VISIBILITIES),
+        default=default_visibility,
+        help="GitHub repository visibility (default: private)",
+    )
+    parser.add_argument("--base-path", help="Base path for github repos (default: ~/github)")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be done without actually publishing",
+    )
+    parser.add_argument("--verbose", action="store_true", help="Verbose output")
+    return parser
+
+
+def _handle_publish(
+    arguments: Sequence[str],
+    default_visibility: str = "private",
+    cwd: Optional[Path] = None,
+) -> bool:
+    options = _build_publish_parser(default_visibility=default_visibility).parse_args(
+        arguments
+    )
+    detected = detect_github_repo_from_cwd(cwd=cwd, base_path=options.base_path)
+    if detected is None:
+        print(
+            "Error: Current directory is not inside a github/<owner>/<repo> folder."
+        )
+        return False
+
+    owner, repo, repo_root = detected
+    return publish_repository(
+        repo_root,
+        owner,
+        repo,
+        visibility=options.visibility,
+        dry_run=options.dry_run,
+        verbose=options.verbose,
+    )
+
+
 def _build_clone_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -804,6 +1164,20 @@ def _build_clone_parser() -> argparse.ArgumentParser:
 
 def _handle_clone(arguments: Sequence[str]) -> None:
     options = _build_clone_parser().parse_args(arguments)
+    if options.url is None:
+        detected = detect_github_repo_from_cwd(base_path=options.base_path)
+        if detected is not None:
+            owner, repo, repo_root = detected
+            publish_repository(
+                repo_root,
+                owner,
+                repo,
+                visibility="private",
+                dry_run=options.dry_run,
+                verbose=options.verbose,
+            )
+            return
+
     url = options.url or _clipboard_url_candidate(max_len=MAX_CLIPBOARD_URL_LENGTH)
     if url is None:
         print(
@@ -859,6 +1233,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         return
     if "grab" in arguments:
         _handle_grab([argument for argument in arguments if argument != "grab"])
+        return
+    if arguments[:1] == ["private"]:
+        _handle_publish(arguments[1:], default_visibility="private")
+        return
+    if arguments[:1] == ["public"]:
+        _handle_publish(arguments[1:], default_visibility="public")
+        return
+    if arguments[:1] == ["publish"]:
+        _handle_publish(arguments[1:], default_visibility="private")
         return
     if arguments[:1] == ["clone"]:
         arguments = arguments[1:]
