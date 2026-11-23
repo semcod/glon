@@ -1,0 +1,75 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-012",
+  "summary": "Sync glon/__init__.py version to 0.1.30",
+  "workstream": "application",
+  "classification": {
+    "kind": "BUG",
+    "priority": "P1",
+    "origin": "health"
+  },
+  "allowedPaths": [
+    "project/ticket-012/**",
+    "project/ticket-011/README.md",
+    "TODO.md",
+    "project/TICKETS.md",
+    ".governance/manifest.json",
+    "glon/__init__.py"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "59111fcfa77cae0936fb82f139f275dfab1eaf7b",
+    "targetBranch": "main",
+    "outcome": "Sync glon/__init__.py __version__ to 0.1.30 so VERSION, pyproject.toml, and package metadata match.",
+    "nonGoals": [
+      "Change runtime behavior",
+      "Add dependencies"
+    ],
+    "complexity": "XS",
+    "estimatedMinutes": 5,
+    "budgets": {
+      "maxImplementationFiles": 1,
+      "maxAffectedComponents": 1,
+      "maxPublicInterfaceChanges": 0,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Update __version__ in glon/__init__.py to 0.1.30.",
+      "components": [
+        {
+          "name": "package-metadata",
+          "paths": [
+            "glon/__init__.py"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert commit on ticket/012-sync-init-version-0-1-30."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "pytest -q",
+          "./project/governance-check.sh"
+        ],
+        "evidence": "All tests and governance checks pass with consistent version 0.1.30."
+      }
+    ]
+  }
+}

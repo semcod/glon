@@ -34,7 +34,7 @@
           "lib/**",
           "test/**",
           "tests/**",
-          "glon/cli.py"
+          "glon/**"
         ]
       },
       "governance": {
