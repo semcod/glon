@@ -603,3 +603,63 @@ class TestPublishRepository:
         mock_print.assert_any_call(
             "Error: Current directory is not inside a github/<owner>/<repo> folder."
         )
+
+    @patch("subprocess.run")
+    def test_publish_rejects_mismatched_origin_remote(self, mock_run) -> None:
+        """Refuse to change visibility or push when origin targets another repo."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "github" / "kvmouse" / "pi2w"
+            (repo_dir / ".git").mkdir(parents=True)
+
+            def fake_run(cmd, **kwargs):
+                if cmd[:3] == ["git", "remote", "get-url"]:
+                    return MagicMock(
+                        returncode=0,
+                        stdout="git@github.com:other-owner/other-repo.git\n",
+                        stderr="",
+                    )
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            mock_run.side_effect = fake_run
+
+            result = publish_repository(repo_dir, "kvmouse", "pi2w", visibility="private")
+
+            assert result is False
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            assert not any(cmd[0] == "gh" for cmd in commands)
+            assert not any(cmd[:2] == ["git", "push"] for cmd in commands)
+            assert not any(cmd[0] == "goal" for cmd in commands)
+
+    @patch("subprocess.run")
+    def test_publish_accepts_case_insensitive_matching_ssh_origin(
+        self, mock_run
+    ) -> None:
+        """Accept SSH origin matching owner/repo regardless of letter case."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_dir = Path(temp_dir) / "github" / "semcod" / "glon"
+            (repo_dir / ".git").mkdir(parents=True)
+
+            def fake_run(cmd, **kwargs):
+                if cmd[:3] == ["git", "remote", "get-url"]:
+                    return MagicMock(
+                        returncode=0,
+                        stdout="git@github.com:Semcod/Glon.git\n",
+                        stderr="",
+                    )
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            mock_run.side_effect = fake_run
+
+            result = publish_repository(repo_dir, "semcod", "glon", visibility="private")
+
+            assert result is True
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            assert [
+                "gh",
+                "repo",
+                "edit",
+                "semcod/glon",
+                "--visibility",
+                "private",
+            ] in commands
+            assert ["goal", "-a"] in commands

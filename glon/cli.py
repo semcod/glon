@@ -876,10 +876,10 @@ def _ensure_git_repo_and_commit(
         return False
 
 
-def _has_origin_remote(repo_dir: Path) -> bool:
-    """Return True when ``origin`` remote is configured in ``repo_dir``."""
+def _get_origin_remote_url(repo_dir: Path) -> Optional[str]:
+    """Return configured ``origin`` remote URL in ``repo_dir``, or ``None``."""
     if not (repo_dir / ".git").exists():
-        return False
+        return None
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
@@ -889,8 +889,28 @@ def _has_origin_remote(repo_dir: Path) -> bool:
             check=False,
         )
     except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    url = (result.stdout or "").strip()
+    return url or None
+
+
+def _has_origin_remote(repo_dir: Path) -> bool:
+    """Return True when ``origin`` remote is configured in ``repo_dir``."""
+    return _get_origin_remote_url(repo_dir) is not None
+
+
+def _origin_matches_repository(origin_url: str, owner: str, repo: str) -> bool:
+    """Return True when ``origin_url`` targets the expected ``owner/repo``."""
+    parsed = parse_git_url(origin_url)
+    if parsed is None:
         return False
-    return result.returncode == 0 and bool((result.stdout or "").strip())
+    remote_owner, remote_repo = parsed
+    return (
+        remote_owner.lower() == owner.lower()
+        and remote_repo.lower() == repo.lower()
+    )
 
 
 def _set_github_visibility(
@@ -1001,7 +1021,15 @@ def _publish_to_github(
 ) -> bool:
     """Create or update the GitHub repository via ``gh`` and push."""
     full_name = f"{owner}/{repo}"
-    if _has_origin_remote(repo_dir):
+    origin_url = _get_origin_remote_url(repo_dir)
+    if origin_url is not None:
+        if not _origin_matches_repository(origin_url, owner, repo):
+            print(
+                f"Error: Existing origin remote '{origin_url}' does not match "
+                f"expected repository '{full_name}'. Refusing to change "
+                "visibility or push."
+            )
+            return False
         return _attach_origin_and_push(
             repo_dir, full_name, visibility, dry_run=dry_run, verbose=verbose
         )
