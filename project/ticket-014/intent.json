@@ -1,0 +1,79 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-014",
+  "summary": "Release v0.1.31 and publish to PyPI via goal",
+  "workstream": "integration",
+  "classification": {
+    "kind": "SERVICE",
+    "priority": "P1",
+    "origin": "requested"
+  },
+  "allowedPaths": [
+    "project/ticket-014/**",
+    "project/ticket-013/README.md",
+    "TODO.md",
+    "project/TICKETS.md",
+    ".governance/manifest.json",
+    "VERSION",
+    "pyproject.toml",
+    "glon/__init__.py"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "d961e14cf6cb2697c1b78e8803b2f004269c06a1",
+    "targetBranch": "main",
+    "outcome": "Release v0.1.31 and publish glon to PyPI via goal.",
+    "nonGoals": [
+      "Change runtime behavior",
+      "Add dependencies"
+    ],
+    "complexity": "XS",
+    "estimatedMinutes": 5,
+    "budgets": {
+      "maxImplementationFiles": 3,
+      "maxAffectedComponents": 1,
+      "maxPublicInterfaceChanges": 0,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Bump package version to 0.1.31 in VERSION, pyproject.toml, and glon/__init__.py for PyPI publication.",
+      "components": [
+        {
+          "name": "release-metadata",
+          "paths": [
+            "VERSION",
+            "pyproject.toml",
+            "glon/__init__.py"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Revert commit on ticket/014-release-v0-1-31."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "pytest -q",
+          "./project/governance-check.sh"
+        ],
+        "evidence": "Version bumped to 0.1.31 consistently across VERSION, pyproject.toml, and glon/__init__.py."
+      }
+    ]
+  }
+}

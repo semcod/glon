@@ -65,6 +65,7 @@
       "integration": {
         "ownedPaths": [
           "VERSION",
+          "glon/__init__.py",
           "package.json",
           "pyproject.toml",
           "go.mod",
